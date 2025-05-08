@@ -1,53 +1,39 @@
-const { drizzle } = require("drizzle-orm/postgres-js");
-const postgres = require("postgres");
+// Simple script to check database connection
+import postgres from 'postgres';
 
 async function main() {
-  console.log("Checking database connection...");
-
   try {
-    // Get the DATABASE_URL from environment variables
-    const connectionString = process.env.DATABASE_URL;
-    if (!connectionString) {
-      throw new Error("DATABASE_URL environment variable is not set");
+    if (!process.env.DATABASE_URL) {
+      throw new Error('DATABASE_URL environment variable is not set');
     }
-
-    // Create a Postgres client
-    const client = postgres(connectionString);
     
-    // Create Drizzle instance
-    const db = drizzle(client);
+    console.log('Connecting to PostgreSQL database...');
+    const sql = postgres(process.env.DATABASE_URL);
     
-    // Try to query the database
-    console.log("Executing test query...");
-    const result = await client`SELECT current_database() as database_name, current_schema() as schema_name`;
+    // Check the connection by running a simple query
+    const result = await sql`SELECT NOW()`;
+    console.log('Connected to database successfully!');
+    console.log('Current timestamp:', result[0].now);
     
-    console.log("Connection successful!");
-    console.log(`Database: ${result[0].database_name}`);
-    console.log(`Schema: ${result[0].schema_name}`);
-    
-    // Try to query a list of tables
-    console.log("\nListing tables in the database:");
-    const tables = await client`
+    // Check if tables exist
+    const tables = await sql`
       SELECT table_name 
       FROM information_schema.tables 
       WHERE table_schema = 'public'
-      ORDER BY table_name;
     `;
     
+    console.log('\nExisting tables:');
     if (tables.length === 0) {
-      console.log("No tables found in the public schema.");
+      console.log('No tables found in the database.');
     } else {
-      console.log("Tables in the database:");
-      tables.forEach((table, i) => {
-        console.log(`${i+1}. ${table.table_name}`);
+      tables.forEach(table => {
+        console.log(`- ${table.table_name}`);
       });
     }
-
-    // Close the client
-    await client.end();
-    console.log("\nDatabase connection closed");
+    
+    await sql.end();
   } catch (error) {
-    console.error("Database connection error:", error.message);
+    console.error('Error connecting to database:', error);
     process.exit(1);
   }
 }
