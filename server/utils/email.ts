@@ -6,34 +6,44 @@ export async function sendVerificationEmail(
   verificationToken: string,
   parentId: string
 ): Promise<void> {
-  // In a real application, you would use a library like nodemailer
-  // to send actual emails to users. For this example, we're just 
-  // logging the information.
-  
-  console.log(`
-    ====== Verification Email ======
-    To: ${email}
-    Subject: Verify Your School Management System Account
+  try {
+    // In a real application, you would use a library like nodemailer
+    // to send actual emails to users. For this example, we're just 
+    // logging the information.
     
-    Dear Parent,
+    console.log(`
+      ====== Verification Email ======
+      To: ${email}
+      Subject: Verify Your School Management System Account
+      
+      Dear Parent,
+      
+      Thank you for registering with the School Management System.
+      Your Parent ID is: ${parentId}
+      
+      Please click the link below to verify your email address:
+      http://localhost:5000/api/auth/verify-email?token=${verificationToken}
+      
+      This link will expire in 24 hours.
+      
+      If you did not create an account, please ignore this email.
+      
+      Regards,
+      School Management System Team
+      ===============================
+    `);
     
-    Thank you for registering with the School Management System.
-    Your Parent ID is: ${parentId}
+    // Simulate a small delay for realism (200ms)
+    await new Promise(resolve => setTimeout(resolve, 200));
     
-    Please click the link below to verify your email address:
-    http://localhost:5000/api/auth/verify-email?token=${verificationToken}
-    
-    This link will expire in 24 hours.
-    
-    If you did not create an account, please ignore this email.
-    
-    Regards,
-    School Management System Team
-    ===============================
-  `);
-  
-  // In a real implementation, you would return a promise from the email sending library
-  return Promise.resolve();
+    // In a real implementation, you would return a promise from the email sending library
+    return Promise.resolve();
+  } catch (error) {
+    console.error('Error sending verification email:', error);
+    // We don't want to fail the registration if the email fails to send
+    // The user can request a new verification email later
+    return Promise.resolve();
+  }
 }
 
 /**

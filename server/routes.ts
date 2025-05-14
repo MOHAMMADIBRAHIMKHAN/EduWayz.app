@@ -1,4 +1,5 @@
-import type { Express } from "express";
+import type { Express, Router } from "express";
+import express from "express";
 import { createServer, type Server } from "http";
 import { storage } from "./storage";
 import session from "express-session";
@@ -9,6 +10,54 @@ import * as authController from "./controllers/auth.controller";
 import * as parentController from "./controllers/parent.controller";
 import * as adminController from "./controllers/admin.controller";
 import { isAuthenticated, isAdmin } from "./middleware/auth.middleware";
+import { validateApiKey, validateAuth } from "./middleware/api-auth.middleware";
+
+// Create separate routers for public and protected routes
+const createAuthRoutes = (): Router => {
+  const router = express.Router();
+  
+  // Public auth routes (no API key or auth required)
+  router.post("/register", authController.register);
+  router.post("/login", passport.authenticate("local"), authController.login);
+  router.get("/verify-email", authController.verifyEmail);
+  router.post("/resend-verification", authController.resendVerification);
+  
+  // Protected auth routes (require authentication)
+  router.post("/logout", isAuthenticated, authController.logout);
+  router.get("/user", isAuthenticated, authController.getCurrentUser);
+  
+  return router;
+};
+
+// Create parent routes (all protected)
+const createParentRoutes = (): Router => {
+  const router = express.Router();
+  
+  // All parent routes require authentication
+  router.use(isAuthenticated);
+  
+  router.get("/profile", parentController.getProfile);
+  router.get("/children", parentController.getChildren);
+  router.get("/notifications", parentController.getNotifications);
+  router.put("/notifications/:id/read", parentController.markNotificationAsRead);
+  
+  return router;
+};
+
+// Create admin routes (all protected and require admin role)
+const createAdminRoutes = (): Router => {
+  const router = express.Router();
+  
+  // All admin routes require admin role
+  router.use(isAdmin);
+  
+  router.post("/schools", adminController.createSchool);
+  router.get("/schools", adminController.getAllSchools);
+  router.get("/schools/:id", adminController.getSchoolById);
+  router.put("/schools/:id", adminController.updateSchool);
+  
+  return router;
+};
 
 export async function registerRoutes(app: Express): Promise<Server> {
   // Set up session middleware
@@ -64,7 +113,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
           }
 
           // Verify password
-          const isValid = (storage as MemStorage).verifyPassword(
+          const isValid = storage.verifyPassword(
             password,
             parent.password
           );
@@ -100,25 +149,22 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  // Auth routes
-  app.post("/api/auth/register", authController.register);
-  app.post("/api/auth/login", passport.authenticate("local"), authController.login);
-  app.post("/api/auth/logout", authController.logout);
-  app.get("/api/auth/verify-email", authController.verifyEmail);
-  app.post("/api/auth/resend-verification", authController.resendVerification);
-  app.get("/api/auth/user", isAuthenticated, authController.getCurrentUser);
-
-  // Parent routes
-  app.get("/api/parent/profile", isAuthenticated, parentController.getProfile);
-  app.get("/api/parent/children", isAuthenticated, parentController.getChildren);
-  app.get("/api/parent/notifications", isAuthenticated, parentController.getNotifications);
-  app.put("/api/parent/notifications/:id/read", isAuthenticated, parentController.markNotificationAsRead);
-
-  // Admin routes - for super admin
-  app.post("/api/admin/schools", isAdmin, adminController.createSchool);
-  app.get("/api/admin/schools", isAdmin, adminController.getAllSchools);
-  app.get("/api/admin/schools/:id", isAdmin, adminController.getSchoolById);
-  app.put("/api/admin/schools/:id", isAdmin, adminController.updateSchool);
+  // Register public auth routes - NO API KEY OR AUTH REQUIRED 
+  // These routes need to be registered BEFORE the protected routes
+  app.use("/api/auth", createAuthRoutes());
+  
+  // Register protected API routes - REQUIRE API KEY AND AUTH
+  // Apply middleware to all '/api' routes EXCEPT '/api/auth'
+  const apiRouter = express.Router();
+  apiRouter.use(validateApiKey);
+  apiRouter.use(validateAuth);
+  
+  // Register sub-routers for different protected areas
+  apiRouter.use("/parent", createParentRoutes());
+  apiRouter.use("/admin", createAdminRoutes());
+  
+  // Mount the protected API router
+  app.use("/api", apiRouter);
 
   // Create HTTP server
   const httpServer = createServer(app);

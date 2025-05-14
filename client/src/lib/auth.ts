@@ -39,7 +39,32 @@ export async function login(data: LoginFormData) {
 }
 
 export async function register(data: RegisterFormData) {
-  return apiRequest("POST", "/api/auth/register", data);
+  try {
+    const response = await apiRequest("POST", "/api/auth/register", data);
+    
+    if (!response.ok) {
+      const errorData = await response.json();
+      
+      // Check for specific errors
+      if (errorData.error && errorData.error.includes("Database connection")) {
+        throw new Error("Unable to connect to database. The server might be temporarily unavailable. Please try again later.");
+      }
+      
+      // Format validation errors nicely
+      if (errorData.errors && Array.isArray(errorData.errors)) {
+        const formattedErrors = errorData.errors.map((e: any) => e.message).join(', ');
+        throw new Error(formattedErrors);
+      }
+      
+      // Throw the original error message or a meaningful default
+      throw new Error(errorData.message || errorData.error || "Registration failed");
+    }
+    
+    return response;
+  } catch (error) {
+    console.error("Registration error:", error);
+    throw error;
+  }
 }
 
 export async function logout() {
@@ -47,18 +72,17 @@ export async function logout() {
 }
 
 export async function getUser() {
-  const res = await fetch("/api/auth/user", {
-    credentials: "include",
-  });
-  
-  if (!res.ok) {
-    if (res.status === 401) {
+  // Use the apiRequest helper instead of direct fetch to ensure consistent auth headers
+  try {
+    const res = await apiRequest("GET", "/api/auth/user");
+    return await res.json();
+  } catch (error) {
+    console.error("Error fetching user:", error);
+    if (error instanceof Error && error.message.includes("401")) {
       return null;
     }
     throw new Error("Failed to fetch user");
   }
-  
-  return res.json();
 }
 
 export async function resendVerificationEmail(email: string) {

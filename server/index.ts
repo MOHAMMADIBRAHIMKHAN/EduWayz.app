@@ -1,10 +1,24 @@
 import express, { type Request, Response, NextFunction } from "express";
 import { registerRoutes } from "./routes";
 import { setupVite, serveStatic, log } from "./vite";
+import { validateApiKey, validateAuth } from "./middleware/api-auth.middleware";
+import cors from "cors";
 
 const app = express();
+
+// Configure CORS - allow credentials with all origins in development mode
+app.use(cors({
+  // In development, allow all origins
+  origin: true,
+  credentials: true,
+  methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
+  allowedHeaders: ['Content-Type', 'apikey', 'Authorization']
+}));
+
 app.use(express.json());
 app.use(express.urlencoded({ extended: false }));
+
+// We'll move the middleware to routes.ts to organize routes better
 
 app.use((req, res, next) => {
   const start = Date.now();
@@ -60,11 +74,8 @@ app.use((req, res, next) => {
   // this serves both the API and the client.
   // It is the only port that is not firewalled.
   const port = 5000;
-  server.listen({
-    port,
-    host: "0.0.0.0",
-    reusePort: true,
-  }, () => {
+  // Windows-compatible configuration
+  server.listen(port, '0.0.0.0', () => {
     log(`serving on port ${port}`);
   });
 })();

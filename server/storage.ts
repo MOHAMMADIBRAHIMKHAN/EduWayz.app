@@ -1,3 +1,7 @@
+// Import dotenv at the top to ensure environment variables are loaded
+import * as dotenv from 'dotenv';
+dotenv.config(); // This loads the .env file into process.env
+
 import { v4 as uuidv4 } from 'uuid';
 import { 
   School, 
@@ -51,6 +55,8 @@ export interface IStorage {
   createNotification(notification: InsertNotification): Promise<Notification>;
   markNotificationAsRead(id: number): Promise<Notification | undefined>;
   
+  // Note: User operations are not implemented in the current schema
+  
   // Utility operations
   verifyPassword(password: string, hashedPassword: string): boolean;
 }
@@ -64,196 +70,288 @@ export class PostgresStorage implements IStorage {
       throw new Error('DATABASE_URL environment variable is not set');
     }
     
-    // Initialize database connection
-    const queryClient = postgres(process.env.DATABASE_URL, { max: 10 });
+    // Initialize database connection with improved configuration for Supabase
+    const queryClient = postgres(process.env.DATABASE_URL, { 
+      max: 5,                    // Reduce max connections to prevent overloading 
+      idle_timeout: 20,          // Shorter idle timeout (seconds)
+      connect_timeout: 10,       // Longer connect timeout (seconds)
+      max_lifetime: 60 * 30,     // Maximum connection lifetime (30 minutes)
+      debug: process.env.NODE_ENV === 'development', // Log queries in development
+      ssl: { rejectUnauthorized: false }, // Handle SSL connections
+      onnotice: () => {},        // Suppress notice messages
+      onparameter: () => {},     // Suppress parameter messages
+      connection: {
+        application_name: 'school-management-system' // Identify app in Supabase logs
+      }
+    });
     this.db = drizzle(queryClient);
     
     console.log('Connected to PostgreSQL database');
   }
   
+  // Helper function for retrying database operations
+  private async retryOperation<T>(operation: () => Promise<T>, maxRetries: number = 3, delay: number = 1000): Promise<T> {
+    let lastError: any;
+    
+    for (let attempt = 1; attempt <= maxRetries; attempt++) {
+      try {
+        return await operation();
+      } catch (error) {
+        lastError = error;
+        console.warn(`Database operation failed (attempt ${attempt}/${maxRetries}):`, 
+          error instanceof Error ? error.message : String(error));
+        
+        // Don't wait on the last attempt
+        if (attempt < maxRetries) {
+          // Exponential backoff with jitter
+          const jitter = Math.random() * 0.3 * delay;
+          const waitTime = delay * Math.pow(2, attempt - 1) + jitter;
+          console.log(`Retrying in ${Math.round(waitTime / 1000)} seconds...`);
+          await new Promise(resolve => setTimeout(resolve, waitTime));
+        }
+      }
+    }
+    
+    // If we reach here, all retries failed
+    console.error('All database operation retry attempts failed');
+    throw lastError;
+  }
+  
   // School operations
   async getSchool(id: number): Promise<School | undefined> {
-    const result = await this.db.select().from(schools).where(eq(schools.id, id));
-    return result[0];
+    return this.retryOperation(async () => {
+      const result = await this.db.select().from(schools).where(eq(schools.id, id));
+      return result[0];
+    });
   }
   
   async getSchoolBySchoolId(schoolId: string): Promise<School | undefined> {
-    const result = await this.db.select().from(schools).where(eq(schools.schoolId, schoolId));
-    return result[0];
+    return this.retryOperation(async () => {
+      const result = await this.db.select().from(schools).where(eq(schools.schoolId, schoolId));
+      return result[0];
+    });
   }
   
   async getAllSchools(): Promise<School[]> {
-    return await this.db.select().from(schools);
+    return this.retryOperation(async () => {
+      return await this.db.select().from(schools);
+    });
   }
   
   async createSchool(school: InsertSchool): Promise<School> {
-    // Generate a school ID
-    const allSchools = await this.getAllSchools();
-    const year = new Date().getFullYear().toString().slice(-2);
-    const schoolId = `SC-${year}${(allSchools.length + 1).toString().padStart(4, '0')}`;
-    
-    const result = await this.db.insert(schools).values({
-      ...school,
-      schoolId,
-    }).returning();
-    
-    return result[0];
+    return this.retryOperation(async () => {
+      // Generate a school ID
+      const allSchools = await this.getAllSchools();
+      const year = new Date().getFullYear().toString().slice(-2);
+      const schoolId = `SC-${year}${(allSchools.length + 1).toString().padStart(4, '0')}`;
+      
+      const result = await this.db.insert(schools).values({
+        ...school,
+        schoolId,
+      }).returning();
+      
+      return result[0];
+    });
   }
   
   async updateSchool(id: number, school: Partial<School>): Promise<School | undefined> {
-    const result = await this.db.update(schools)
-      .set({
-        ...school,
-        updatedAt: new Date()
-      })
-      .where(eq(schools.id, id))
-      .returning();
-    
-    return result[0];
+    return this.retryOperation(async () => {
+      const result = await this.db.update(schools)
+        .set({
+          ...school,
+          updatedAt: new Date()
+        })
+        .where(eq(schools.id, id))
+        .returning();
+      
+      return result[0];
+    });
   }
   
   // Parent operations
   async getParent(id: number): Promise<Parent | undefined> {
-    const result = await this.db.select().from(parents).where(eq(parents.id, id));
-    return result[0];
+    return this.retryOperation(async () => {
+      const result = await this.db.select().from(parents).where(eq(parents.id, id));
+      return result[0];
+    });
   }
   
   async getParentByParentId(parentId: string): Promise<Parent | undefined> {
-    const result = await this.db.select().from(parents).where(eq(parents.parentId, parentId));
-    return result[0];
+    return this.retryOperation(async () => {
+      const result = await this.db.select().from(parents).where(eq(parents.parentId, parentId));
+      return result[0];
+    });
   }
   
   async getParentByEmail(email: string): Promise<Parent | undefined> {
-    const result = await this.db.select().from(parents).where(eq(parents.email, email));
-    return result[0];
+    return this.retryOperation(async () => {
+      const result = await this.db.select().from(parents).where(eq(parents.email, email));
+      return result[0];
+    });
   }
   
   async getParentByVerificationToken(token: string): Promise<Parent | undefined> {
-    const result = await this.db.select().from(parents).where(eq(parents.verificationToken, token));
-    return result[0];
+    return this.retryOperation(async () => {
+      const result = await this.db.select().from(parents).where(eq(parents.verificationToken, token));
+      return result[0];
+    });
   }
   
   async getAllParents(): Promise<Parent[]> {
-    return await this.db.select().from(parents);
+    return this.retryOperation(async () => {
+      return await this.db.select().from(parents);
+    });
   }
   
   async createParent(parent: InsertParent): Promise<Parent> {
-    // Generate a parent ID
-    const allParents = await this.getAllParents();
-    const lastParentId = allParents.length > 0 
-      ? allParents.sort((a, b) => b.id - a.id)[0].parentId 
-      : undefined;
-    
-    const parentId = generateParentId(lastParentId);
-    const verificationToken = uuidv4();
-    
-    // Hash the password
-    const hashedPassword = this.hashPassword(parent.password);
-    
-    const result = await this.db.insert(parents).values({
-      ...parent,
-      parentId,
-      password: hashedPassword,
-      isVerified: false,
-      verificationToken,
-    }).returning();
-    
-    return result[0];
+    return this.retryOperation(async () => {
+      // Generate a parent ID
+      const allParents = await this.getAllParents();
+      const lastParentId = allParents.length > 0 
+        ? allParents.sort((a, b) => b.id - a.id)[0].parentId 
+        : undefined;
+      
+      const parentId = generateParentId(lastParentId);
+      const verificationToken = uuidv4();
+      
+      // Hash the password
+      const hashedPassword = this.hashPassword(parent.password);
+      
+      const result = await this.db.insert(parents).values({
+        ...parent,
+        parentId,
+        password: hashedPassword,
+        isVerified: false,
+        verificationToken,
+      }).returning();
+      
+      return result[0];
+    });
   }
   
   async updateParent(id: number, parent: Partial<Parent>): Promise<Parent | undefined> {
-    // Hash the password if it's being updated
-    if (parent.password) {
-      parent.password = this.hashPassword(parent.password);
-    }
-    
-    const result = await this.db.update(parents)
-      .set({
-        ...parent,
-        updatedAt: new Date()
-      })
-      .where(eq(parents.id, id))
-      .returning();
-    
-    return result[0];
+    return this.retryOperation(async () => {
+      // Hash the password if it's being updated
+      if (parent.password) {
+        parent.password = this.hashPassword(parent.password);
+      }
+      
+      const result = await this.db.update(parents)
+        .set({
+          ...parent,
+          updatedAt: new Date()
+        })
+        .where(eq(parents.id, id))
+        .returning();
+      
+      return result[0];
+    });
   }
   
   async verifyParent(id: number): Promise<Parent | undefined> {
-    const result = await this.db.update(parents)
-      .set({
-        isVerified: true,
-        verificationToken: null,
-        updatedAt: new Date()
-      })
-      .where(eq(parents.id, id))
-      .returning();
-    
-    return result[0];
+    return this.retryOperation(async () => {
+      const result = await this.db.update(parents)
+        .set({
+          isVerified: true,
+          verificationToken: null,
+          updatedAt: new Date()
+        })
+        .where(eq(parents.id, id))
+        .returning();
+      
+      return result[0];
+    });
   }
   
   // Student operations
   async getStudent(id: number): Promise<Student | undefined> {
-    const result = await this.db.select().from(students).where(eq(students.id, id));
-    return result[0];
+    return this.retryOperation(async () => {
+      const result = await this.db.select().from(students).where(eq(students.id, id));
+      return result[0];
+    });
   }
   
   async getStudentByStudentId(studentId: string): Promise<Student | undefined> {
-    const result = await this.db.select().from(students).where(eq(students.studentId, studentId));
-    return result[0];
+    return this.retryOperation(async () => {
+      const result = await this.db.select().from(students).where(eq(students.studentId, studentId));
+      return result[0];
+    });
   }
   
   async getStudentsByParentId(parentId: number): Promise<Student[]> {
-    return await this.db.select().from(students).where(eq(students.parentId, parentId));
+    return this.retryOperation(async () => {
+      return await this.db.select().from(students).where(eq(students.parentId, parentId));
+    });
   }
   
   async getStudentsBySchoolId(schoolId: number): Promise<Student[]> {
-    return await this.db.select().from(students).where(eq(students.schoolId, schoolId));
+    return this.retryOperation(async () => {
+      return await this.db.select().from(students).where(eq(students.schoolId, schoolId));
+    });
   }
   
   async createStudent(student: InsertStudent): Promise<Student> {
-    // Generate a student ID
-    const allStudents = await this.db.select().from(students);
-    const year = new Date().getFullYear().toString().slice(-2);
-    const studentId = `STU-${year}${(allStudents.length + 1).toString().padStart(4, '0')}`;
-    
-    const result = await this.db.insert(students).values({
-      ...student,
-      studentId,
-    }).returning();
-    
-    return result[0];
+    return this.retryOperation(async () => {
+      // Generate a student ID
+      const allStudents = await this.db.select().from(students);
+      const year = new Date().getFullYear().toString().slice(-2);
+      const studentId = `STU-${year}${(allStudents.length + 1).toString().padStart(4, '0')}`;
+      
+      const result = await this.db.insert(students).values({
+        ...student,
+        studentId,
+        // Ensure required fields have values
+        section: student.section || null,
+        status: student.status || 'Active',
+      }).returning();
+      
+      return result[0];
+    });
   }
   
   // Notification operations
   async getNotification(id: number): Promise<Notification | undefined> {
-    const result = await this.db.select().from(notifications).where(eq(notifications.id, id));
-    return result[0];
+    return this.retryOperation(async () => {
+      const result = await this.db.select().from(notifications).where(eq(notifications.id, id));
+      return result[0];
+    });
   }
   
   async getNotificationsByParentId(parentId: number): Promise<Notification[]> {
-    return await this.db.select()
-      .from(notifications)
-      .where(eq(notifications.parentId, parentId))
-      .orderBy(desc(notifications.createdAt));
+    return this.retryOperation(async () => {
+      return await this.db.select()
+        .from(notifications)
+        .where(eq(notifications.parentId, parentId))
+        .orderBy(desc(notifications.createdAt));
+    });
   }
   
   async createNotification(notification: InsertNotification): Promise<Notification> {
-    const result = await this.db.insert(notifications).values({
-      ...notification,
-      isRead: false,
-    }).returning();
-    
-    return result[0];
+    return this.retryOperation(async () => {
+      const result = await this.db.insert(notifications).values({
+        ...notification,
+        isRead: false,
+        // Ensure required fields have values
+        schoolId: notification.schoolId || null,
+        parentId: notification.parentId || null,
+      }).returning();
+      
+      return result[0];
+    });
   }
   
   async markNotificationAsRead(id: number): Promise<Notification | undefined> {
-    const result = await this.db.update(notifications)
-      .set({ isRead: true })
-      .where(eq(notifications.id, id))
-      .returning();
-    
-    return result[0];
+    return this.retryOperation(async () => {
+      const result = await this.db.update(notifications)
+        .set({ isRead: true })
+        .where(eq(notifications.id, id))
+        .returning();
+      
+      return result[0];
+    });
   }
+  
+  // Note: User operations would be implemented here if schema supported them
   
   // Helper methods
   private hashPassword(password: string): string {
@@ -313,9 +411,28 @@ export class MemStorage implements IStorage {
     const schoolId = `SC-${year}${id.toString().padStart(4, '0')}`;
     
     const newSchool: School = {
-      ...school,
       id,
       schoolId,
+      schoolName: school.schoolName,
+      establishmentYear: school.establishmentYear,
+      email: school.email,
+      phone: school.phone,
+      website: school.website || null,
+      addressLine1: school.addressLine1,
+      addressLine2: school.addressLine2 || null,
+      city: school.city,
+      province: school.province,
+      postalCode: school.postalCode,
+      country: school.country || "Saudi Arabia",
+      // Use appropriate fields from the schema
+      adminName: school.adminName,
+      adminPosition: school.adminPosition,
+      adminEmail: school.adminEmail,
+      adminPhone: school.adminPhone,
+      schoolType: school.schoolType,
+      educationLevel: school.educationLevel,
+      language: school.language,
+      capacity: school.capacity,
       createdAt: now,
       updatedAt: now
     };
@@ -383,10 +500,31 @@ export class MemStorage implements IStorage {
     const hashedPassword = this.hashPassword(parent.password);
     
     const newParent: Parent = {
-      ...parent,
       id,
+      email: parent.email,
       parentId,
       password: hashedPassword,
+      fatherName: parent.fatherName,
+      fatherOccupation: parent.fatherOccupation,
+      fatherContact: parent.fatherContact,
+      motherName: parent.motherName,
+      motherOccupation: parent.motherOccupation,
+      motherContact: parent.motherContact,
+      currentAddressLine1: parent.currentAddressLine1,
+      currentAddressLine2: parent.currentAddressLine2 || null,
+      currentCity: parent.currentCity,
+      currentProvince: parent.currentProvince,
+      currentPostalCode: parent.currentPostalCode,
+      currentCountry: parent.currentCountry || "Saudi Arabia",
+      permanentAddressLine1: parent.permanentAddressLine1 || parent.currentAddressLine1,
+      permanentAddressLine2: parent.permanentAddressLine2 || null,
+      permanentCity: parent.permanentCity || parent.currentCity,
+      permanentProvince: parent.permanentProvince || parent.currentProvince,
+      permanentPostalCode: parent.permanentPostalCode || parent.currentPostalCode,
+      permanentCountry: parent.permanentCountry || parent.currentCountry || "Saudi Arabia",
+      emergencyName: parent.emergencyName,
+      emergencyRelation: parent.emergencyRelation,
+      emergencyContact: parent.emergencyContact,
       isVerified: false,
       verificationToken,
       createdAt: now,
@@ -467,9 +605,18 @@ export class MemStorage implements IStorage {
     const studentId = `STU-${year}${id.toString().padStart(4, '0')}`;
     
     const newStudent: Student = {
-      ...student,
       id,
       studentId,
+      schoolId: student.schoolId,
+      parentId: student.parentId,
+      firstName: student.firstName,
+      lastName: student.lastName,
+      dateOfBirth: student.dateOfBirth,
+      gender: student.gender,
+      grade: student.grade,
+      section: student.section || null,
+      enrollmentDate: student.enrollmentDate,
+      status: student.status || 'Active',
       createdAt: now,
       updatedAt: now
     };
@@ -494,8 +641,12 @@ export class MemStorage implements IStorage {
     const now = new Date();
     
     const newNotification: Notification = {
-      ...notification,
       id,
+      type: notification.type,
+      title: notification.title,
+      description: notification.description,
+      schoolId: notification.schoolId || null,
+      parentId: notification.parentId || null,
       isRead: false,
       createdAt: now
     };
@@ -520,7 +671,8 @@ export class MemStorage implements IStorage {
     return updatedNotification;
   }
   
-  // Helper methods
+  // Note: User operations would be implemented here if schema supported them
+  
   private hashPassword(password: string): string {
     // In a real application, use a proper password hashing library
     return crypto.createHash('sha256').update(password).digest('hex');
@@ -532,18 +684,22 @@ export class MemStorage implements IStorage {
   }
 }
 
-// Determine which storage implementation to use
+// Initialize the storage implementation 
+// Use PostgreSQL if a connection string is provided, otherwise fallback to in-memory storage
 let storage: IStorage;
 
 try {
-  // Try to use PostgreSQL storage
-  storage = new PostgresStorage();
-  console.log('Using PostgreSQL storage');
+  if (process.env.DATABASE_URL) {
+    storage = new PostgresStorage();
+    console.log('Using PostgreSQL storage');
+  } else {
+    storage = new MemStorage();
+    console.log('Using in-memory storage (no DATABASE_URL provided)');
+  }
 } catch (error) {
-  // Fall back to memory storage if PostgreSQL fails
-  console.error('Failed to connect to PostgreSQL:', error);
-  console.log('Falling back to memory storage');
+  console.error('Error initializing PostgreSQL storage, falling back to in-memory:', error);
   storage = new MemStorage();
+  console.log('Using in-memory storage (fallback)');
 }
 
 export { storage };

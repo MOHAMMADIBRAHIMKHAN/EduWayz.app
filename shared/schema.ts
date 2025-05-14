@@ -10,7 +10,7 @@ export const schools = pgTable("schools", {
   establishmentYear: integer("establishment_year").notNull(),
   email: text("email").notNull(),
   phone: text("phone").notNull(),
-  website: text("website"),
+  website: text("website") || null,
   
   // Address information
   addressLine1: text("address_line1").notNull(),

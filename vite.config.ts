@@ -1,31 +1,22 @@
-import { defineConfig } from "vite";
-import react from "@vitejs/plugin-react";
-import path from "path";
-import runtimeErrorOverlay from "@replit/vite-plugin-runtime-error-modal";
+import { defineConfig } from 'vite';
+import react from '@vitejs/plugin-react-swc';
+import tsconfigPaths from 'vite-tsconfig-paths';
+import path from 'path';
 
 export default defineConfig({
+  root: './client', // ✅ where your index.html is located
   plugins: [
-    react(),
-    runtimeErrorOverlay(),
-    ...(process.env.NODE_ENV !== "production" &&
-    process.env.REPL_ID !== undefined
-      ? [
-          await import("@replit/vite-plugin-cartographer").then((m) =>
-            m.cartographer(),
-          ),
-        ]
-      : []),
+    tsconfigPaths(), // ✅ correct plugin usage
+    react()
   ],
-  resolve: {
-    alias: {
-      "@": path.resolve(import.meta.dirname, "client", "src"),
-      "@shared": path.resolve(import.meta.dirname, "shared"),
-      "@assets": path.resolve(import.meta.dirname, "attached_assets"),
-    },
-  },
-  root: path.resolve(import.meta.dirname, "client"),
   build: {
-    outDir: path.resolve(import.meta.dirname, "dist/public"),
+    outDir: '../dist', // ✅ output outside client folder
     emptyOutDir: true,
+    chunkSizeWarningLimit: 3000,
+    target: 'esnext',
+  },
+  server: {
+    host: '0.0.0.0',
+    port: 3000,
   },
 });
